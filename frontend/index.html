@@ -7,12 +7,16 @@
     <title>SGB · Sistema de Gestión de Beneficiarios</title>
     <script>
       // SPA en GitHub Pages: 404.html guarda la ruta original aquí y redirige
-      // al index; este script la restaura sin recargar.
+      // al index; este script la restaura sin recargar. Acepta la ruta con o
+      // sin el prefijo base (compatibilidad con versiones cacheadas).
       (function () {
         var redirect = sessionStorage.redirect;
         delete sessionStorage.redirect;
-        if (redirect && redirect !== location.pathname + location.search + location.hash) {
-          history.replaceState(null, null, redirect);
+        if (redirect) {
+          var base = '/sgb-maquetacion-ev04/';
+          var target = redirect.indexOf(base) === 0 ? redirect : base + redirect.replace(/^\//, '');
+          var actual = location.pathname + location.search + location.hash;
+          if (target !== actual) history.replaceState(null, null, target);
         }
       })();
     </script>
