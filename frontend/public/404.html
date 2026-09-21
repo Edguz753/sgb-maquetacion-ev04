@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <title>SGB · Sistema de Gestión de Beneficiarios</title>
+    <script>
+      // SPA redirect para GitHub Pages:
+      // GitHub sirve este archivo para cualquier ruta desconocida (p.ej.
+      // /sgb-maquetacion-ev04/beneficiarios/1). Guardamos la ruta pedida,
+      // redirigimos al index real y allí el script de index.html la restaura.
+      (function () {
+        var base = '/sgb-maquetacion-ev04/';
+        var l = window.location;
+        var rutaCompleta = l.pathname.slice(base.length - 1) + l.search + l.hash;
+        sessionStorage.redirect = rutaCompleta;
+        l.replace(base);
+      })();
+    </script>
+  </head>
+  <body>
+    <p>Redirigiendo… <a href="/sgb-maquetacion-ev04/">Abrir la aplicación</a></p>
+  </body>
+</html>

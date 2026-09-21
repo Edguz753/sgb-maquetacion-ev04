@@ -5,6 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/png" href="%BASE_URL%favicon.png" />
     <title>SGB · Sistema de Gestión de Beneficiarios</title>
+    <script>
+      // SPA en GitHub Pages: 404.html guarda la ruta original aquí y redirige
+      // al index; este script la restaura sin recargar.
+      (function () {
+        var redirect = sessionStorage.redirect;
+        delete sessionStorage.redirect;
+        if (redirect && redirect !== location.pathname + location.search + location.hash) {
+          history.replaceState(null, null, redirect);
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
