@@ -1,0 +1,56 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    container_name: sgb_postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-sgb}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sgb_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-sgb}
+    ports:
+      - "${DATABASE_PORT:-5433}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sgb} -d ${POSTGRES_DB:-sgb}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: dockerfile
+    restart: unless-stopped
+    container_name: sgb_backend
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-sgb}:${POSTGRES_PASSWORD:-sgb_secret}@postgres:5432/${POSTGRES_DB:-sgb}?schema=public
+      JWT_SECRET: ${JWT_SECRET:-cambiar-este-secreto-en-produccion}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-8h}
+      PORT: 3000
+    ports:
+      - "${PORT:-3000}:3000"
+    volumes:
+      - uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: >
+      sh -c "npx prisma migrate deploy &&
+             npx prisma db seed &&
+             node dist/index.js"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: dockerfile
+    restart: unless-stopped
+    container_name: sgb_frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
+  uploads:

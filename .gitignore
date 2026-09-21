@@ -1,0 +1,22 @@
+# Dependencias
+node_modules/
+
+# Builds
+dist/
+build/
+
+# Secretos y entorno
+.env
+.env.*
+!.env.example
+
+# Archivos subidos por usuarios (evidencias, soportes)
+uploads/
+
+# Editor y sistema
+.vscode/
+*.log
+Thumbs.db
+.DS_Store
+
+.openclaw/

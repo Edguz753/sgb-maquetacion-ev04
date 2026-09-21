@@ -1,0 +1,974 @@
+// Sistema de Gestión de Beneficiarios — Schema Prisma
+// Línea base: SGB V4.1.1 (ERD Definitivo + schema.sql + Alembic)
+// Ajuste: FK BIGINT identity → Int (autoIncrement) por ergonomía de Prisma/JSON;
+//         estructura, enums, relaciones y nombres 1:1 con el DDL V4.1.1.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// ENUMS (14 — 1:1 con schema.sql V4.1.1)
+// ============================================================
+
+enum EstadoBeneficiario {
+  ACTIVO
+  EGRESADO
+  SUSPENDIDO
+}
+
+enum EstadoCaso {
+  ACTIVO
+  CERRADO
+  SUSPENDIDO
+}
+
+enum EstadoAsignacion {
+  ACTIVA
+  FINALIZADA
+  SUSPENDIDA
+}
+
+enum EstadoActividad {
+  PENDIENTE
+  REALIZADA
+  ATRASADA
+  CANCELADA
+  NO_APLICA
+}
+
+enum PrioridadActividad {
+  BAJA
+  MEDIA
+  ALTA
+  URGENTE
+}
+
+enum EstadoDocumento {
+  PENDIENTE
+  RECIBIDO
+  VIGENTE
+  VENCIDO
+  FALTANTE
+  NO_APLICA
+}
+
+enum EstadoRevisionArchivo {
+  PENDIENTE
+  CORRECTO
+  INCOMPLETO
+  ATRASADO
+}
+
+enum NivelRiesgoNutricional {
+  SIN_RIESGO
+  CON_RIESGO
+}
+
+enum EstadoControl {
+  PENDIENTE
+  REALIZADO
+  ATRASADO
+  CANCELADO
+  NO_APLICA
+}
+
+enum EstadoRed {
+  IDENTIFICADA
+  REMISIONADA
+  ACTIVA
+  VERIFICACION_PENDIENTE
+  CERRADA
+}
+
+enum EstadoAlerta {
+  NUEVA
+  ASIGNADA
+  EN_PROCESO
+  ATENDIDA
+  CERRADA
+  CANCELADA
+  REABIERTA
+}
+
+enum TipoAlerta {
+  DOCUMENTO
+  ACTIVIDAD
+  ARCHIVO
+  SALUD
+  NUTRICION
+  ESCOLARIZACION
+  RED_APOYO
+  EDAD
+  VENCIMIENTO
+  SISTEMA
+}
+
+enum AlcancePermiso {
+  ALL
+  OWN
+  ASSIGNED
+  NONE
+}
+
+enum EstadoReglaInstancia {
+  PENDIENTE
+  PROCESADA
+  OMITIDA
+  ERROR
+}
+
+// ============================================================
+// IDENTIDAD Y RBAC
+// ============================================================
+
+model Rol {
+  id          Int      @id @default(autoincrement())
+  nombre      String   @unique @db.VarChar(50)
+  descripcion String?
+  activo      Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  usuarios    Usuario[]
+  rolPermisos RolPermiso[]
+
+  @@map("rol")
+}
+
+model Permiso {
+  id          Int            @id @default(autoincrement())
+  recurso     String         @db.VarChar(80)
+  accion      String         @db.VarChar(40)
+  alcance     AlcancePermiso @default(ALL)
+  descripcion String?
+  activo      Boolean        @default(true)
+
+  rolPermisos RolPermiso[]
+
+  @@unique([recurso, accion, alcance])
+  @@map("permiso")
+}
+
+model RolPermiso {
+  rolId     Int @map("rol_id")
+  permisoId Int @map("permiso_id")
+
+  rol     Rol     @relation(fields: [rolId], references: [id], onDelete: Cascade)
+  permiso Permiso @relation(fields: [permisoId], references: [id], onDelete: Cascade)
+
+  @@id([rolId, permisoId])
+  @@map("rol_permiso")
+}
+
+model Usuario {
+  id           Int       @id @default(autoincrement())
+  rolId        Int       @map("rol_id")
+  username     String    @unique @db.VarChar(80)
+  email        String?   @unique @db.VarChar(255)
+  passwordHash String    @map("password_hash")
+  nombre       String    @db.VarChar(100)
+  apellido     String    @db.VarChar(100)
+  activo       Boolean   @default(true)
+  ultimoAcceso DateTime? @map("ultimo_acceso") @db.Timestamptz(6)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  rol                Rol                  @relation(fields: [rolId], references: [id])
+  profesional        Profesional?
+  evidenciasCargadas Evidencia[]          @relation("CargadoPor")
+  controlesArchivo   ControlArchivo[]     @relation("RevisadoPor")
+  condicionesRegistradas Condicion[]      @relation("RegistradoPor")
+  alertasCreadas     Alerta[]             @relation("CreadaPor")
+  alertasResponsable Alerta[]             @relation("ResponsableAlerta")
+  auditorias         Auditoria[]
+
+  @@map("usuario")
+}
+
+model Profesional {
+  id             Int      @id @default(autoincrement())
+  usuarioId      Int?     @unique @map("usuario_id")
+  tipoDocumento  String?  @map("tipo_documento") @db.VarChar(30)
+  numeroDocumento String?  @unique @map("numero_documento") @db.VarChar(50)
+  nombres        String   @db.VarChar(100)
+  apellidos      String   @db.VarChar(100)
+  activo         Boolean  @default(true)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  usuario            Usuario?           @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
+  asignaciones       AsignacionCaso[]
+  controlesNutricionales ControlNutricional[]
+  escolarizaciones   Escolarizacion[]
+  controlesArchivo   ControlArchivo[]   @relation("ProfResponsableArchivo")
+  redesApoyo         RedApoyo[]
+  monitores          Monitor[]
+
+  @@map("profesional")
+}
+
+// ============================================================
+// BENEFICIARIOS Y CASOS
+// ============================================================
+
+model Beneficiario {
+  id              Int                @id @default(autoincrement())
+  numeroHistoria  String             @unique @map("numero_historia") @db.VarChar(50)
+  tipoDocumento   String             @map("tipo_documento") @db.VarChar(30)
+  numeroDocumento String             @unique @map("numero_documento") @db.VarChar(50)
+  nombres         String             @db.VarChar(100)
+  apellidos       String             @db.VarChar(100)
+  fechaNacimiento DateTime           @map("fecha_nacimiento") @db.Date
+  genero          String?            @db.VarChar(30)
+  telefono        String?            @db.VarChar(30)
+  correo          String?            @db.VarChar(255)
+  direccion       String?
+  estado          EstadoBeneficiario @default(ACTIVO)
+  fechaIngreso    DateTime           @map("fecha_ingreso") @db.Date
+  fechaEgreso     DateTime?          @map("fecha_egreso") @db.Date
+  motivoEgreso    String?            @map("motivo_egreso")
+  observaciones   String?
+  createdAt       DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  sim              String?     @map("sim") @db.VarChar(50)
+  jornadaClub      String?     @map("jornada_club") @db.VarChar(50)
+  taller           String?     @db.VarChar(60)
+  barrio           String?     @db.VarChar(120)
+  monitorId        Int?        @map("monitor_id")
+  epsId            Int?        @map("eps_id")
+  defensoriaId     Int?        @map("defensoria_id")
+  estadoAfiliacionId Int?      @map("estado_afiliacion_id")
+  monitor          Monitor?     @relation(fields: [monitorId], references: [id], onDelete: SetNull)
+  eps              Eps?         @relation(fields: [epsId], references: [id], onDelete: SetNull)
+  defensoria       Defensoria?  @relation(fields: [defensoriaId], references: [id], onDelete: SetNull)
+  estadoAfiliacion EstadoAfiliacion? @relation(fields: [estadoAfiliacionId], references: [id], onDelete: SetNull)
+  casos            Caso[]
+  documentos       Documento[]
+  condiciones      Condicion[]
+  controlesSalud   ControlSalud[]
+  controlesNutricionales ControlNutricional[]
+  escolarizaciones Escolarizacion[]
+  matriculas        ColegioBeneficiario[]
+  acudientes        BeneficiarioAcudiente[]
+  atenciones            Atencion[]
+  planesAtencion        PlanAtencion[]
+  hechosEmergentes      HechoEmergente[]
+  redesApoyo       RedApoyo[]
+  reglasInstancia  ReglaInstancia[]
+  alertas          Alerta[]
+  festivoExcepciones FestivoExcepcion[]
+
+  @@index([estado])
+  @@index([fechaIngreso])
+  @@index([fechaEgreso])
+  @@index([fechaNacimiento])
+  @@map("beneficiario")
+}
+
+model Caso {
+  id            Int        @id @default(autoincrement())
+  beneficiarioId Int       @map("beneficiario_id")
+  numeroCaso    String     @unique @map("numero_caso") @db.VarChar(50)
+  fechaApertura DateTime   @map("fecha_apertura") @db.Date
+  fechaCierre   DateTime?  @map("fecha_cierre") @db.Date
+  estado        EstadoCaso @default(ACTIVO)
+  motivoIngreso String?    @map("motivo_ingreso")
+  observaciones String?
+  createdAt     DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  beneficiario Beneficiario     @relation(fields: [beneficiarioId], references: [id])
+  asignaciones AsignacionCaso[]
+  documentos   Documento[]
+
+  @@index([beneficiarioId])
+  @@index([estado])
+  @@map("caso")
+}
+
+model Area {
+  id          Int     @id @default(autoincrement())
+  codigo      String  @unique @db.VarChar(10)
+  nombre      String  @unique @db.VarChar(80)
+  descripcion String?
+  activa      Boolean @default(true)
+
+  asignaciones AsignacionCaso[]
+  tipoActividades TipoActividad[]
+  controlesArchivo ControlArchivo[] @relation("AreaResponsableArchivo")
+
+  @@map("area")
+}
+
+model AsignacionCaso {
+  id            Int              @id @default(autoincrement())
+  casoId        Int              @map("caso_id")
+  profesionalId Int              @map("profesional_id")
+  areaId        Int              @map("area_id")
+  fechaInicio   DateTime         @map("fecha_inicio") @db.Date
+  fechaFin      DateTime?        @map("fecha_fin") @db.Date
+  estado        EstadoAsignacion @default(ACTIVA)
+  motivoCambio  String?          @map("motivo_cambio")
+  observaciones String?
+  createdAt     DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  caso        Caso        @relation(fields: [casoId], references: [id])
+  profesional Profesional @relation(fields: [profesionalId], references: [id])
+  area        Area        @relation(fields: [areaId], references: [id])
+  actividades Actividad[]
+
+  @@index([casoId])
+  @@index([profesionalId])
+  @@index([areaId])
+  @@map("asignacion_caso")
+}
+
+// ============================================================
+// ACTIVIDADES
+// ============================================================
+
+model TipoActividad {
+  id               Int     @id @default(autoincrement())
+  codigo           String  @unique @db.VarChar(50)
+  nombre           String  @db.VarChar(120)
+  areaId           Int?    @map("area_id")
+  periodicidadDias Int?    @map("periodicidad_dias")
+  requiereArchivo  Boolean @default(false) @map("requiere_archivo")
+  activa           Boolean @default(true)
+
+  area        Area?       @relation(fields: [areaId], references: [id], onDelete: SetNull)
+  actividades Actividad[]
+
+  @@map("tipo_actividad")
+}
+
+model Actividad {
+  id                Int              @id @default(autoincrement())
+  asignacionCasoId  Int              @map("asignacion_caso_id")
+  tipoActividadId   Int              @map("tipo_actividad_id")
+  fechaProgramada   DateTime         @map("fecha_programada") @db.Date
+  fechaRealizacion  DateTime?        @map("fecha_realizacion") @db.Date
+  estado            EstadoActividad  @default(PENDIENTE)
+  prioridad         PrioridadActividad @default(MEDIA)
+  esEmergente       Boolean          @default(false) @map("es_emergente")
+  observaciones     String?
+  createdAt         DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  asignacionCaso AsignacionCaso @relation(fields: [asignacionCasoId], references: [id])
+  tipoActividad  TipoActividad  @relation(fields: [tipoActividadId], references: [id])
+  evidencias     Evidencia[]
+  alertas        Alerta[]
+
+  @@index([asignacionCasoId])
+  @@index([tipoActividadId])
+  @@index([fechaProgramada, estado])
+  @@map("actividad")
+}
+
+// ============================================================
+// DOCUMENTOS Y ARCHIVO
+// ============================================================
+
+model TipoDocumento {
+  id          Int      @id @default(autoincrement())
+  codigo      String   @unique @db.VarChar(80)
+  nombre      String   @db.VarChar(150)
+  categoria   String?  @db.VarChar(80)
+  obligatorio Boolean  @default(false)
+  edadInicio  Int?     @map("edad_inicio")
+  edadFin     Int?     @map("edad_fin")
+  activa      Boolean  @default(true)
+
+  documentos Documento[]
+
+  @@map("tipo_documento")
+}
+
+model Documento {
+  id              Int             @id @default(autoincrement())
+  beneficiarioId  Int             @map("beneficiario_id")
+  casoId          Int?            @map("caso_id")
+  tipoDocumentoId Int             @map("tipo_documento_id")
+  fechaDocumento  DateTime?       @map("fecha_documento") @db.Date
+  fechaRecepcion  DateTime?       @map("fecha_recepcion") @db.Date
+  fechaVencimiento DateTime?      @map("fecha_vencimiento") @db.Date
+  estado          EstadoDocumento @default(PENDIENTE)
+  observaciones   String?
+  createdAt       DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  beneficiario    Beneficiario   @relation(fields: [beneficiarioId], references: [id])
+  caso            Caso?          @relation(fields: [casoId], references: [id], onDelete: SetNull)
+  tipoDocumento   TipoDocumento  @relation(fields: [tipoDocumentoId], references: [id])
+  evidencias      Evidencia[]
+  controlesArchivo ControlArchivo[]
+  soportesRed     SoporteRed[]
+  controlesSaludSoporte ControlSalud[] @relation("SoporteControlSalud")
+  alertas               Alerta[]
+
+  @@index([beneficiarioId])
+  @@index([casoId])
+  @@index([tipoDocumentoId])
+  @@index([estado])
+  @@map("documento")
+}
+
+model Evidencia {
+  id            Int       @id @default(autoincrement())
+  actividadId   Int?      @map("actividad_id")
+  documentoId   Int?      @map("documento_id")
+  nombreArchivo String    @map("nombre_archivo") @db.VarChar(255)
+  rutaReferencia String   @map("ruta_referencia")
+  tipoMime      String?   @map("tipo_mime") @db.VarChar(120)
+  fechaCarga    DateTime  @default(now()) @map("fecha_carga") @db.Timestamptz(6)
+  cargadoPor    Int       @map("cargado_por")
+  observaciones String?
+
+  actividad Actividad? @relation(fields: [actividadId], references: [id], onDelete: SetNull)
+  documento Documento? @relation(fields: [documentoId], references: [id], onDelete: SetNull)
+  cargadoPorUsuario Usuario @relation("CargadoPor", fields: [cargadoPor], references: [id])
+
+  @@map("evidencia")
+}
+
+model ControlArchivo {
+  id                    Int                  @id @default(autoincrement())
+  documentoId           Int                  @map("documento_id")
+  revisadoPor           Int                  @map("revisado_por")
+  fechaRevision         DateTime             @default(now()) @map("fecha_revision") @db.Timestamptz(6)
+  archivado             Boolean              @default(false)
+  estadoRevision        EstadoRevisionArchivo @default(PENDIENTE) @map("estado_revision")
+  areaResponsableId     Int?                 @map("area_responsable_id")
+  profesionalResponsableId Int?              @map("profesional_responsable_id")
+  observaciones         String?
+
+  documento      Documento    @relation(fields: [documentoId], references: [id], onDelete: Cascade)
+  revisadoPorUsuario Usuario  @relation("RevisadoPor", fields: [revisadoPor], references: [id])
+  areaResponsable Area?       @relation("AreaResponsableArchivo", fields: [areaResponsableId], references: [id])
+  profesionalResponsable Profesional? @relation("ProfResponsableArchivo", fields: [profesionalResponsableId], references: [id])
+
+  @@map("control_archivo")
+}
+
+// ============================================================
+// CONDICIONES Y SALUD
+// ============================================================
+
+model TipoCondicion {
+  id        Int     @id @default(autoincrement())
+  nombre    String  @unique @db.VarChar(150)
+  categoria String? @db.VarChar(80)
+  activa    Boolean @default(true)
+
+  condiciones Condicion[]
+
+  @@map("tipo_condicion")
+}
+
+model Condicion {
+  id             Int       @id @default(autoincrement())
+  beneficiarioId Int       @map("beneficiario_id")
+  tipoCondicionId Int      @map("tipo_condicion_id")
+  fechaDeteccion DateTime  @map("fecha_deteccion") @db.Date
+  fechaInicio    DateTime? @map("fecha_inicio") @db.Date
+  fechaFin       DateTime? @map("fecha_fin") @db.Date
+  estado         String    @default("ACTIVA") @db.VarChar(30)
+  descripcion    String?
+  registradoPor  Int?      @map("registrado_por")
+
+  beneficiario   Beneficiario @relation(fields: [beneficiarioId], references: [id])
+  tipoCondicion  TipoCondicion @relation(fields: [tipoCondicionId], references: [id])
+  registradoPorUsuario Usuario? @relation("RegistradoPor", fields: [registradoPor], references: [id])
+
+  @@index([beneficiarioId])
+  @@map("condicion")
+}
+
+model TipoControlSalud {
+  id                Int     @id @default(autoincrement())
+  codigo            String  @unique @db.VarChar(60)
+  nombre            String  @db.VarChar(120)
+  periodicidadMeses Int?    @map("periodicidad_meses")
+  aplicaPorDefecto  Boolean @default(false) @map("aplica_por_defecto")
+  activa            Boolean @default(true)
+
+  controlesSalud ControlSalud[]
+
+  @@map("tipo_control_salud")
+}
+
+model ControlSalud {
+  id                    Int           @id @default(autoincrement())
+  beneficiarioId        Int           @map("beneficiario_id")
+  tipoControlId         Int           @map("tipo_control_id")
+  fechaProgramada       DateTime?     @map("fecha_programada") @db.Date
+  fechaRealizacion      DateTime?     @map("fecha_realizacion") @db.Date
+  fechaProximoControl   DateTime?     @map("fecha_proximo_control") @db.Date
+  requiereControlEspecial Boolean     @default(false) @map("requiere_control_especial")
+  especialidad          String?       @db.VarChar(120)
+  estado                EstadoControl @default(PENDIENTE)
+  soporteDocumentoId    Int?          @map("soporte_documento_id")
+  observaciones         String?
+
+  beneficiario  Beneficiario @relation(fields: [beneficiarioId], references: [id])
+  tipoControl   TipoControlSalud @relation(fields: [tipoControlId], references: [id])
+  soporteDocumento Documento? @relation("SoporteControlSalud", fields: [soporteDocumentoId], references: [id], onDelete: SetNull)
+
+  @@index([beneficiarioId])
+  @@map("control_salud")
+}
+
+model ControlNutricional {
+  id                Int                   @id @default(autoincrement())
+  beneficiarioId    Int                   @map("beneficiario_id")
+  profesionalId     Int                   @map("profesional_id")
+  fechaControl      DateTime              @map("fecha_control") @db.Date
+  nivelRiesgo       NivelRiesgoNutricional @map("nivel_riesgo")
+  peso              Decimal?              @db.Decimal(6, 2)
+  talla             Decimal?              @db.Decimal(6, 2)
+  imc               Decimal?              @db.Decimal(6, 2)
+  imcPercentil      Float?                @map("imc_percentil")
+  categoriaImc      String?               @map("categoria_imc") @db.VarChar(40)
+  imcP95            Float?                @map("imc_p95")
+  periodicidadMeses Int                   @map("periodicidad_meses")
+  fechaProximoControl DateTime?           @map("fecha_proximo_control") @db.Date
+  observaciones     String?
+  createdAt         DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  beneficiario Beneficiario @relation(fields: [beneficiarioId], references: [id])
+  profesional  Profesional  @relation(fields: [profesionalId], references: [id])
+
+  @@index([beneficiarioId])
+  @@map("control_nutricional")
+}
+
+// ============================================================
+// ESCOLARIZACIÓN Y REDES
+// ============================================================
+
+model Escolarizacion {
+  id            Int       @id @default(autoincrement())
+  beneficiarioId Int      @map("beneficiario_id")
+  profesionalId Int       @map("profesional_id")
+  institucion   String?   @db.VarChar(200)
+  grado         String?   @db.VarChar(80)
+  jornada       String?   @db.VarChar(50)
+  estadoEscolar String?   @map("estado_escolar") @db.VarChar(80)
+  periodo       String?   @db.VarChar(50)
+  fechaRegistro DateTime  @default(now()) @map("fecha_registro") @db.Date
+  observaciones String?
+
+  beneficiario Beneficiario @relation(fields: [beneficiarioId], references: [id])
+  profesional  Profesional  @relation(fields: [profesionalId], references: [id])
+
+  @@index([beneficiarioId])
+  @@map("escolarizacion")
+}
+
+model Acudiente {
+  id              Int     @id @default(autoincrement())
+  nombres         String  @db.VarChar(150)
+  tipoDocumento   String? @map("tipo_documento") @db.VarChar(30)
+  numeroDocumento String? @map("numero_documento") @db.VarChar(50)
+  telefono        String? @db.VarChar(30)
+  direccion       String?
+  correo          String? @db.VarChar(255)
+  ocupacion       String? @db.VarChar(120)
+  observaciones   String?
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  vinculaciones BeneficiarioAcudiente[]
+
+  @@index([numeroDocumento])
+  @@map("acudiente")
+}
+
+model BeneficiarioAcudiente {
+  id             Int     @id @default(autoincrement())
+  beneficiarioId Int     @map("beneficiario_id")
+  acudienteId    Int     @map("acudiente_id")
+  parentezco     String  @db.VarChar(50)
+  esPrincipal    Boolean @default(false) @map("es_principal")
+  convive        Boolean @default(false)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  beneficiario Beneficiario @relation(fields: [beneficiarioId], references: [id], onDelete: Cascade)
+  acudiente    Acudiente    @relation(fields: [acudienteId], references: [id], onDelete: Cascade)
+
+  @@unique([beneficiarioId, acudienteId])
+  @@index([acudienteId])
+  @@map("beneficiario_acudiente")
+}
+
+model Monitor {
+  id     Int    @id @default(autoincrement())
+  codigo String @unique @db.VarChar(50)
+  nombre String @db.VarChar(150)
+  profesionalId Int?    @map("profesional_id")
+  profesional    Profesional? @relation(fields: [profesionalId], references: [id])
+
+  beneficiarios Beneficiario[]
+
+  @@map("monitor")
+}
+
+model Eps {
+  id      Int    @id @default(autoincrement())
+  nombre  String @unique @db.VarChar(150)
+  regimen String? @map("regimen") @db.VarChar(50)
+
+  beneficiarios Beneficiario[]
+
+  @@map("eps")
+}
+
+model Defensoria {
+  id          Int    @id @default(autoincrement())
+  nombre      String @unique @db.VarChar(150)
+  centroZonal String? @map("centro_zonal") @db.VarChar(80)
+
+  beneficiarios Beneficiario[]
+
+  @@map("defensoria")
+}
+
+model EstadoAfiliacion {
+  id          Int    @id @default(autoincrement())
+  nombre      String @unique @db.VarChar(80)
+  descripcion String?
+
+  beneficiarios Beneficiario[]
+
+  @@map("estado_afiliacion")
+}
+
+model Colegio {
+  id        Int    @id @default(autoincrement())
+  nombre    String @unique @db.VarChar(200)
+  localidad String? @db.VarChar(120)
+  sede      String? @db.VarChar(80)
+
+  matriculas   ColegioBeneficiario[]
+  orientadores Orientador[]
+
+  @@map("colegio")
+}
+
+model EstadoEscolar {
+  id          Int    @id @default(autoincrement())
+  nombre      String @unique @db.VarChar(80)
+  descripcion String?
+
+  matriculas ColegioBeneficiario[]
+
+  @@map("estado_escolar")
+}
+
+model Orientador {
+  id         Int    @id @default(autoincrement())
+  colegioId  Int    @map("colegio_id")
+  nombre     String @db.VarChar(150)
+  telefono   String? @db.VarChar(30)
+  correo     String? @db.VarChar(255)
+
+  colegio Colegio @relation(fields: [colegioId], references: [id], onDelete: Cascade)
+
+  @@map("orientador")
+}
+
+model ColegioBeneficiario {
+  id              Int    @id @default(autoincrement())
+  beneficiarioId  Int    @map("beneficiario_id")
+  colegioId       Int?   @map("colegio_id")
+  estadoEscolarId Int    @map("estado_escolar_id")
+  jornada         String? @db.VarChar(50)
+  grado           String? @db.VarChar(50)
+  fechaInicio     DateTime @map("fecha_inicio") @db.Date
+  fechaFin        DateTime? @map("fecha_fin") @db.Date
+  actual          Boolean @default(false)
+  observaciones   String?
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  beneficiario  Beneficiario  @relation(fields: [beneficiarioId], references: [id], onDelete: Cascade)
+  colegio       Colegio?      @relation(fields: [colegioId], references: [id], onDelete: SetNull)
+  estadoEscolar EstadoEscolar @relation(fields: [estadoEscolarId], references: [id])
+
+  @@index([beneficiarioId])
+  @@map("colegio_beneficiario")
+}
+
+model PlanAtencion {
+  id                Int     @id @default(autoincrement())
+  beneficiarioId    Int     @map("beneficiario_id")
+  nombre            String  @db.VarChar(150)
+  periodicidadMeses Int     @default(3) @map("periodicidad_meses")
+  activo            Boolean @default(true)
+  creadoPor         Int     @map("creado_por")
+  observaciones     String?
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  beneficiario Beneficiario @relation(fields: [beneficiarioId], references: [id], onDelete: Cascade)
+  atenciones   Atencion[]
+
+  @@index([beneficiarioId])
+  @@map("plan_atencion")
+}
+
+model Atencion {
+  id                 Int      @id @default(autoincrement())
+  beneficiarioId     Int      @map("beneficiario_id")
+  areaCodigo         String   @map("area_codigo") @db.VarChar(10)
+  tipo               String   @db.VarChar(50)
+  planAtencionId     Int?     @map("plan_atencion_id")
+  hechoEmergenteId   Int?     @map("hecho_emergente_id")
+  fechaProgramada    DateTime @map("fecha_programada") @db.Date
+  fechaRealizacion   DateTime? @map("fecha_realizacion") @db.Date
+  estado             String   @default("PENDIENTE") @db.VarChar(30)
+  riesgoEmergente    String?  @map("riesgo_emergente") @db.VarChar(20)
+  observaciones      String?
+  creadoPor          Int      @map("creado_por")
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  beneficiario    Beneficiario     @relation(fields: [beneficiarioId], references: [id], onDelete: Cascade)
+  planAtencion    PlanAtencion?    @relation(fields: [planAtencionId], references: [id], onDelete: Cascade)
+  hechoEmergente  HechoEmergente?  @relation(fields: [hechoEmergenteId], references: [id], onDelete: Cascade)
+
+  @@index([beneficiarioId])
+  @@index([fechaProgramada])
+  @@index([areaCodigo])
+  @@map("atencion")
+}
+
+model HechoEmergente {
+  id              Int     @id @default(autoincrement())
+  beneficiarioId  Int     @map("beneficiario_id")
+  fechaHecho      DateTime @map("fecha_hecho") @db.Date
+  ubicacion       String  @db.VarChar(50)
+  descripcion     String?
+  actaReferencia  String? @map("acta_referencia") @db.VarChar(120)
+  nivelRiesgo     String  @map("nivel_riesgo") @db.VarChar(20)
+  estado          String  @default("ABIERTO") @db.VarChar(30)
+  creadoPor       Int     @map("creado_por")
+  observaciones   String?
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  beneficiario Beneficiario @relation(fields: [beneficiarioId], references: [id], onDelete: Cascade)
+  atenciones   Atencion[]
+
+  @@index([beneficiarioId])
+  @@map("hecho_emergente")
+}
+
+model TipoRedApoyo {
+  id          Int     @id @default(autoincrement())
+  nombre      String  @unique @db.VarChar(150)
+  descripcion String?
+  activa      Boolean @default(true)
+
+  redesApoyo RedApoyo[]
+
+  @@map("tipo_red_apoyo")
+}
+
+model RedApoyo {
+  id              Int       @id @default(autoincrement())
+  beneficiarioId  Int       @map("beneficiario_id")
+  tipoRedId       Int       @map("tipo_red_id")
+  profesionalId   Int?      @map("profesional_id")
+  fechaActivacion DateTime? @map("fecha_activacion") @db.Date
+  fechaRemision   DateTime? @map("fecha_remision") @db.Date
+  fechaIngresoRed DateTime? @map("fecha_ingreso_red") @db.Date
+  estado          EstadoRed @default(IDENTIFICADA)
+  fechaCierre     DateTime? @map("fecha_cierre") @db.Date
+  observaciones   String?
+
+  beneficiario Beneficiario @relation(fields: [beneficiarioId], references: [id])
+  tipoRed      TipoRedApoyo @relation(fields: [tipoRedId], references: [id])
+  profesional  Profesional? @relation(fields: [profesionalId], references: [id])
+  soportes     SoporteRed[]
+
+  @@index([beneficiarioId])
+  @@index([estado])
+  @@map("red_apoyo")
+}
+
+model SoporteRed {
+  id          Int      @id @default(autoincrement())
+  redApoyoId  Int      @map("red_apoyo_id")
+  documentoId Int      @map("documento_id")
+  fechaSoporte DateTime @default(now()) @map("fecha_soporte") @db.Date
+  observaciones String?
+
+  redApoyo  RedApoyo   @relation(fields: [redApoyoId], references: [id], onDelete: Cascade)
+  documento Documento  @relation(fields: [documentoId], references: [id])
+
+  @@map("soporte_red")
+}
+
+// ============================================================
+// MOTOR DE REGLAS Y ALERTAS
+// ============================================================
+
+model Regla {
+  id        Int      @id @default(autoincrement())
+  codigo    String   @unique @db.VarChar(80)
+  nombre    String   @db.VarChar(150)
+  tipo      String   @db.VarChar(60)
+  condicion String
+  accion    String
+  prioridad Int      @default(100)
+  activa    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  instancias ReglaInstancia[]
+  alertas    Alerta[]
+
+  @@map("regla")
+}
+
+model ReglaInstancia {
+  id              Int                 @id @default(autoincrement())
+  reglaId         Int                 @map("regla_id")
+  beneficiarioId  Int                 @map("beneficiario_id")
+  fechaEvaluacion DateTime            @map("fecha_evaluacion") @db.Date
+  estado          EstadoReglaInstancia @default(PENDIENTE)
+  valorContexto   Json?               @map("valor_contexto")
+  ultimaEjecucion DateTime?           @map("ultima_ejecucion") @db.Timestamptz(6)
+
+  regla        Regla        @relation(fields: [reglaId], references: [id])
+  beneficiario Beneficiario @relation(fields: [beneficiarioId], references: [id])
+
+  @@index([beneficiarioId])
+  @@map("regla_instancia")
+}
+
+model Alerta {
+  id             Int          @id @default(autoincrement())
+  beneficiarioId Int          @map("beneficiario_id")
+  reglaId        Int?         @map("regla_id")
+  actividadId    Int?         @map("actividad_id")
+  documentoId    Int?         @map("documento_id")
+  creadaPor      Int?         @map("creada_por")
+  responsableId  Int?         @map("responsable_id")
+  titulo         String       @db.VarChar(200)
+  descripcion    String?
+  tipo           TipoAlerta
+  prioridad      PrioridadActividad @default(MEDIA)
+  estado         EstadoAlerta @default(NUEVA)
+  fechaGeneracion DateTime    @default(now()) @map("fecha_generacion") @db.Timestamptz(6)
+  fechaLimite    DateTime?    @map("fecha_limite") @db.Date
+  fechaAtencion  DateTime?    @map("fecha_atencion") @db.Timestamptz(6)
+  fechaCierre    DateTime?    @map("fecha_cierre") @db.Timestamptz(6)
+  observaciones  String?
+
+  beneficiario Beneficiario @relation(fields: [beneficiarioId], references: [id])
+  regla        Regla?       @relation(fields: [reglaId], references: [id], onDelete: SetNull)
+  actividad    Actividad?   @relation(fields: [actividadId], references: [id], onDelete: SetNull)
+  documento    Documento?   @relation(fields: [documentoId], references: [id], onDelete: SetNull)
+  creadaPorUsuario    Usuario? @relation("CreadaPor", fields: [creadaPor], references: [id])
+  responsableUsuario  Usuario? @relation("ResponsableAlerta", fields: [responsableId], references: [id])
+
+  @@index([beneficiarioId])
+  @@index([responsableId, estado])
+  @@index([fechaLimite])
+  @@map("alerta")
+}
+
+// ============================================================
+// CALENDARIO Y AUDITORÍA
+// ============================================================
+
+model Festivo {
+  id     Int     @id @default(autoincrement())
+  fecha  DateTime @unique @db.Date
+  nombre String  @db.VarChar(150)
+  pais   String  @default("CO") @db.Char(2)
+  activo Boolean @default(true)
+
+  @@map("festivo")
+}
+
+model FestivoExcepcion {
+  id            Int     @id @default(autoincrement())
+  beneficiarioId Int    @map("beneficiario_id")
+  fecha         DateTime @db.Date
+  motivo        String
+  activo        Boolean @default(true)
+
+  beneficiario Beneficiario @relation(fields: [beneficiarioId], references: [id], onDelete: Cascade)
+
+  @@unique([beneficiarioId, fecha])
+  @@map("festivo_excepcion")
+}
+
+model Auditoria {
+  id           Int      @id @default(autoincrement())
+  usuarioId    Int?     @map("usuario_id")
+  accion       String   @db.VarChar(60)
+  recurso      String   @db.VarChar(100)
+  registroId   Int?     @map("registro_id")
+  fechaHora    DateTime @default(now()) @map("fecha_hora") @db.Timestamptz(6)
+  valorAnterior Json?   @map("valor_anterior")
+  valorNuevo   Json?    @map("valor_nuevo")
+  observacion  String?
+
+  usuario Usuario? @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
+
+  @@index([usuarioId])
+  @@index([recurso])
+  @@index([fechaHora])
+  @@map("auditoria")
+}
+
+enum EstadoPreIngreso {
+  PENDIENTE
+  CITADO
+  CONFIRMADO
+  INGRESADO
+  DESCARTADO
+}
+
+// Pre-ingreso: candidato al programa en fase de citación (hoja "Ingresos" del histórico Excel)
+model PreIngreso {
+  id              Int                @id @default(autoincrement())
+  nombre          String             @db.VarChar(150)
+  tipoDocumento   String?            @map("tipo_documento") @db.VarChar(30)
+  numeroDocumento String?            @map("numero_documento") @db.VarChar(50)
+  acudiente       String?            @db.VarChar(150)
+  documentoAcudiente String?         @map("documento_acudiente") @db.VarChar(50)
+  ocupacionAcudiente String?         @map("ocupacion_acudiente") @db.VarChar(120)
+  telefono        String?            @db.VarChar(80)
+  barrio          String?            @db.VarChar(120)
+  direccion       String?
+  motivoAperturaCupo String?         @map("motivo_apertura_cupo")
+  antecedentesMedicos String?        @map("antecedentes_medicos")
+  lugarResidencia String?            @map("lugar_residencia") @db.VarChar(150)
+  fechaCitacion   DateTime?          @map("fecha_citacion") @db.Date
+  horaCitacion    String?            @map("hora_citacion") @db.VarChar(20)
+  recordatorio    String?            @db.VarChar(60)
+  respuesta       String?            @db.VarChar(150)
+  observaciones   String?
+  estado          EstadoPreIngreso   @default(PENDIENTE)
+  createdAt       DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([estado])
+  @@index([fechaCitacion])
+  @@map("pre_ingreso")
+}
