@@ -41,6 +41,29 @@ class DemoError extends Error {
   }
 }
 
+// Restaura la sesión demo desde localStorage (la recarga de página borra la
+// memoria, pero el usuario queda en localStorage como en la app real).
+(function restaurarSesion() {
+  try {
+    const raw = localStorage.getItem('sgb.user');
+    if (!raw) return;
+    const u = JSON.parse(raw);
+    const encontrado = DEMO_USERS.find((x) => x.username === u?.username);
+    if (encontrado) {
+      S.usuario = {
+        id: 100 + DEMO_USERS.indexOf(encontrado),
+        username: encontrado.username,
+        nombreCompleto: encontrado.nombre + ' ' + encontrado.apellido,
+        email: encontrado.username + '@sgb.local',
+        rol: encontrado.rol,
+        profesional: encontrado.profesional,
+      };
+    }
+  } catch {
+    /* localStorage no disponible */
+  }
+})();
+
 function allBens() {
   return [...S.beneficiarios, ...demoEgresados];
 }

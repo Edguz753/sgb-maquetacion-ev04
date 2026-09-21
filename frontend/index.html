@@ -16,6 +16,19 @@
         }
       })();
     </script>
+    <script>
+      // Modo demo: restaurar el usuario desde localStorage ANTES de que React
+      // arranque, para no perder la sesión en recargas / navegación directa.
+      (function () {
+        try {
+          var raw = localStorage.getItem('sgb.user');
+          if (raw && !localStorage.getItem('sgb.token')) {
+            var u = JSON.parse(raw);
+            if (u && u.username) localStorage.setItem('sgb.token', 'demo-token-' + u.username);
+          }
+        } catch (e) { /* ignorar */ }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -6,13 +6,12 @@
     <script>
       // SPA redirect para GitHub Pages:
       // GitHub sirve este archivo para cualquier ruta desconocida (p.ej.
-      // /sgb-maquetacion-ev04/beneficiarios/1). Guardamos la ruta pedida,
+      // /sgb-maquetacion-ev04/beneficiarios/1). Guardamos la ruta completa,
       // redirigimos al index real y allí el script de index.html la restaura.
       (function () {
         var base = '/sgb-maquetacion-ev04/';
         var l = window.location;
-        var rutaCompleta = l.pathname.slice(base.length - 1) + l.search + l.hash;
-        sessionStorage.redirect = rutaCompleta;
+        sessionStorage.redirect = l.pathname + l.search + l.hash;
         l.replace(base);
       })();
     </script>
